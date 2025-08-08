@@ -1,0 +1,249 @@
+---
+title: "Boston Housing Regression Analysis"
+author: "Abdullah Shahzad"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# Introduction
+
+This report presents a detailed regression analysis of the **Boston Housing** dataset.  
+The goal is to investigate how various housing characteristics affect the **median value of owner-occupied homes** (`medv`) in different suburbs of Boston.
+
+We will:
+
+1. Explore and visualize the dataset.
+2. Identify key predictors of `medv`.
+3. Fit and evaluate regression models (linear and polynomial).
+4. Interpret the results and insights.
+
+The dataset comes from the **MASS** package and contains 506 observations with 14 variables.
+
+---
+
+# Load Libraries and Data
+
+```{r setup, message=FALSE, warning=FALSE}
+library(MASS)      # For Boston dataset
+library(tidyverse) # Data manipulation and visualization
+library(car)       # For VIF calculations
+library(corrplot)  # For correlation plots
+library(caret)     # For train-test splitting
+```
+
+```{r load-data}
+# Load the dataset
+data("Boston")
+
+# Quick look at the data
+glimpse(Boston)
+summary(Boston)
+
+# Check for missing values
+colSums(is.na(Boston))
+```
+
+---
+
+# Exploratory Data Analysis
+
+## Correlation with Target Variable
+
+```{r correlation}
+corr_matrix <- cor(Boston)
+corrplot(corr_matrix, method = "color", tl.cex = 0.7)
+
+sort(corr_matrix[, "medv"], decreasing = TRUE)
+```
+
+**Observation:**  
+- `rm` (average number of rooms) has a strong positive correlation with `medv`.  
+- `lstat` (% lower status) has a strong negative correlation.  
+
+---
+
+## Distribution of Median Home Value
+
+```{r medv-distribution}
+Boston %>% 
+  ggplot(aes(x = medv)) +
+  geom_histogram(binwidth = 1, fill = "skyblue", color = "black") +
+  geom_vline(aes(xintercept = mean(medv)),
+             linetype = "dashed", linewidth = 1) +
+  annotate("text", x = mean(Boston$medv) + 5, y = 60,
+           label = paste("Mean:", round(mean(Boston$medv), 2))) +
+  labs(title = "Distribution of Median Home Value", x = "medv", y = "Count")
+```
+
+```{r medv-boxplot}
+Boston %>% 
+  ggplot(aes(y = medv)) +
+  geom_boxplot(fill = "orange") +
+  labs(title = "Boxplot of Median Home Value")
+```
+
+---
+
+## Scatterplots for Key Variables
+
+```{r scatterplots}
+pairs(~ rm + lstat + medv,
+      data = Boston,
+      panel = panel.smooth)
+```
+
+**Insights:**
+- `rm` vs `medv`: Strong linear relationship.
+- `lstat` vs `medv`: Downward curve, suggesting non-linearity.
+- `lstat` vs `rm`: Negative correlation.
+
+---
+
+# Model Building
+
+## Model 1: Simple Multiple Linear Regression
+
+```{r model1}
+model1 <- lm(medv ~ rm + lstat, data = Boston)
+summary(model1)
+
+# Plot predicted vs actual
+pred <- predict(model1)
+actual <- Boston$medv
+plot(pred, actual, pch = 20,
+     xlab = "Predicted Values", ylab = "Actual Values")
+abline(0, 1, col = "red", lwd = 2)
+```
+
+**Observation:** Model explains ~64% of variance (R²), but struggles with extreme values.
+
+---
+
+## Model 2: Adding More Predictors
+
+```{r model2}
+model2 <- lm(medv ~ rm + lstat + ptratio + tax + black + crim, data = Boston)
+summary(model2)
+
+vif(model2)
+```
+
+**Observation:**  
+- Some predictors (e.g., `tax`, `crim`) are not statistically significant.
+- Multicollinearity is present but manageable.
+
+---
+
+## Model 3: Removing Insignificant Predictors
+
+```{r model3}
+model3 <- lm(medv ~ rm + lstat + ptratio + black, data = Boston)
+summary(model3)
+```
+
+---
+
+# Polynomial Regression for Non-Linearity
+
+Since `lstat` shows curvature in its relationship with `medv`, we add a squared term.
+
+```{r polymodel}
+polymodel <- lm(medv ~ rm + lstat + I(lstat^2) + ptratio + black, data = Boston)
+summary(polymodel)
+
+vif(polymodel)
+```
+
+```{r lstat-plot}
+lstat_vals <- seq(min(Boston$lstat), max(Boston$lstat), length.out = 100)
+rm_mean <- mean(Boston$rm)
+ptratio_mean <- mean(Boston$ptratio)
+black_mean <- mean(Boston$black)
+
+newdata <- data.frame(
+  rm = rm_mean,
+  lstat = lstat_vals,
+  ptratio = ptratio_mean,
+  black = black_mean
+)
+
+predicted_medv <- predict(polymodel, newdata = newdata)
+
+plot(Boston$lstat, Boston$medv, pch = 16, col = "gray",
+     xlab = "LSTAT (% lower status)", ylab = "MEDV",
+     main = "Effect of LSTAT on MEDV (Squared Term)")
+lines(lstat_vals, predicted_medv, col = "blue", lwd = 2)
+```
+
+---
+
+## Polynomial on `rm` as Well
+
+```{r poly2}
+poly2 <- lm(medv ~ rm + I(rm^2) + lstat + I(lstat^2) + ptratio + black, data = Boston)
+summary(poly2)
+```
+
+```{r rm-plot}
+rm_vals <- seq(min(Boston$rm), max(Boston$rm), length.out = 100)
+lstat_mean <- mean(Boston$lstat)
+
+newdata <- data.frame(
+  lstat = lstat_mean,
+  rm = rm_vals,
+  ptratio = ptratio_mean,
+  black = black_mean
+)
+
+predicted_medv <- predict(poly2, newdata = newdata)
+
+plot(Boston$rm, Boston$medv, pch = 16, col = "gray",
+     xlab = "RM (avg rooms)", ylab = "MEDV",
+     main = "Effect of RM on MEDV (Squared Term)")
+lines(rm_vals, predicted_medv, col = "blue", lwd = 2)
+```
+
+---
+
+# Model Diagnostics
+
+```{r diagnostics}
+par(mfrow = c(2, 2))
+plot(poly2)
+```
+
+**Observations:**
+- Residuals show less curvature compared to earlier models.
+- Still some outliers at high `medv` values.
+
+---
+
+# Train-Test Evaluation
+
+```{r train-test}
+set.seed(123)
+train_index <- createDataPartition(Boston$medv, p = 0.8, list = FALSE)
+train_data <- Boston[train_index, ]
+test_data <- Boston[-train_index, ]
+
+model_train <- lm(medv ~ rm + I(rm^2) + lstat + I(lstat^2) + ptratio + black,
+                  data = train_data)
+
+pred_train <- predict(model_train, newdata = train_data)
+rmse_train <- sqrt(mean((pred_train - train_data$medv)^2))
+
+pred_test <- predict(model_train, newdata = test_data)
+rmse_test <- sqrt(mean((pred_test - test_data$medv)^2))
+
+rmse_train
+rmse_test
+```
+
+---
+
+# Conclusion
+
+- `rm` and `lstat` are the strongest predictors of `medv`.
+- Polynomial terms for `lstat` and `rm` improve model fit.
+- Final polynomial multiple regression reduces error and captures curvature in the data.
+- Caution: Model still struggles with extreme `medv` values, indicating potential need for robust regression or transformation.
